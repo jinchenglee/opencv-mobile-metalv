@@ -1,0 +1,171 @@
+# Makefile for building OpenCV bare-metal example application
+# Usage: make -f Makefile.example
+
+# Configuration
+TOOLCHAIN_PREFIX = riscv64-unknown-elf
+OPENCV_DIR = install_baremetal
+
+# Compiler and tools
+CC = $(TOOLCHAIN_PREFIX)-gcc
+CXX = $(TOOLCHAIN_PREFIX)-g++
+AS = $(TOOLCHAIN_PREFIX)-gcc
+LD = $(TOOLCHAIN_PREFIX)-g++
+OBJCOPY = $(TOOLCHAIN_PREFIX)-objcopy
+OBJDUMP = $(TOOLCHAIN_PREFIX)-objdump
+SIZE = $(TOOLCHAIN_PREFIX)-size
+
+# Architecture flags - adjust for your hardware
+ARCH_FLAGS = -march=rv64gc -mabi=lp64d
+
+# Choose newlib or newlib-nano
+USE_NANO = 1
+ifeq ($(USE_NANO),1)
+    SPECS = --specs=nano.specs
+    $(info Using newlib-nano)
+else
+    SPECS =
+    $(info Using standard newlib)
+endif
+
+# Common flags
+COMMON_FLAGS = $(ARCH_FLAGS) $(SPECS) -ffunction-sections -fdata-sections
+
+# Optimization flags
+OPT_FLAGS = -O2
+# For smaller code size, use: OPT_FLAGS = -Os
+
+# C flags
+CFLAGS = $(COMMON_FLAGS) $(OPT_FLAGS)
+CFLAGS += -Wall -Wextra
+CFLAGS += -D_GNU_SOURCE -D_USE_MATH_DEFINES
+
+# C++ flags
+CXXFLAGS = $(COMMON_FLAGS) $(OPT_FLAGS)
+CXXFLAGS += -Wall -Wextra
+CXXFLAGS += -fno-exceptions -fno-rtti -fno-use-cxa-atexit
+CXXFLAGS += -D_GNU_SOURCE -D_USE_MATH_DEFINES
+CXXFLAGS += -I$(OPENCV_DIR)/include/opencv4
+
+# Linker flags
+LDFLAGS = $(COMMON_FLAGS) $(OPT_FLAGS)
+LDFLAGS += -T riscv_baremetal.ld
+LDFLAGS += -L$(OPENCV_DIR)/lib
+LDFLAGS += -Wl,--gc-sections
+LDFLAGS += -Wl,-Map=output.map
+LDFLAGS += -static
+
+# Libraries (order matters!)
+LIBS = -lopencv_imgproc -lopencv_core -lm
+
+# Source files
+SOURCES = start.S bare_metal_syscalls.c example_app.cpp
+
+# Object files
+OBJECTS = $(SOURCES:.cpp=.o)
+OBJECTS := $(OBJECTS:.c=.o)
+OBJECTS := $(OBJECTS:.S=.o)
+
+# Output files
+TARGET = opencv_example
+ELF = $(TARGET).elf
+BIN = $(TARGET).bin
+HEX = $(TARGET).hex
+MAP = output.map
+
+# Phony targets
+.PHONY: all clean size objdump help
+
+# Default target
+all: $(ELF) $(BIN) size
+
+# Link
+$(ELF): $(OBJECTS)
+	@echo "Linking $@..."
+	$(LD) $(LDFLAGS) -o $@ $^ $(LIBS)
+	@echo "Done."
+
+# Binary
+$(BIN): $(ELF)
+	@echo "Creating binary $@..."
+	$(OBJCOPY) -O binary $< $@
+
+# Hex file (optional)
+$(HEX): $(ELF)
+	@echo "Creating hex $@..."
+	$(OBJCOPY) -O ihex $< $@
+
+# Assembly from C++
+%.o: %.cpp
+	@echo "Compiling $<..."
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
+
+# Assembly from C
+%.o: %.c
+	@echo "Compiling $<..."
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+# Assembly files
+%.o: %.S
+	@echo "Assembling $<..."
+	$(AS) $(ARCH_FLAGS) -c -o $@ $<
+
+# Show size information
+size: $(ELF)
+	@echo ""
+	@echo "=== Size Information ==="
+	$(SIZE) $(ELF)
+	@echo ""
+	@echo "=== Section Sizes ==="
+	$(SIZE) -A $(ELF)
+	@echo ""
+
+# Generate disassembly
+objdump: $(ELF)
+	@echo "Generating disassembly..."
+	$(OBJDUMP) -D $(ELF) > $(TARGET).dis
+	@echo "Disassembly saved to $(TARGET).dis"
+
+# Clean build artifacts
+clean:
+	@echo "Cleaning..."
+	rm -f $(OBJECTS) $(ELF) $(BIN) $(HEX) $(MAP) $(TARGET).dis
+	@echo "Clean complete."
+
+# Help
+help:
+	@echo "OpenCV Bare-Metal Example Makefile"
+	@echo ""
+	@echo "Targets:"
+	@echo "  all      - Build ELF and BIN files (default)"
+	@echo "  clean    - Remove build artifacts"
+	@echo "  size     - Show size information"
+	@echo "  objdump  - Generate disassembly"
+	@echo "  help     - Show this help"
+	@echo ""
+	@echo "Configuration:"
+	@echo "  TOOLCHAIN_PREFIX = $(TOOLCHAIN_PREFIX)"
+	@echo "  OPENCV_DIR       = $(OPENCV_DIR)"
+	@echo "  ARCH_FLAGS       = $(ARCH_FLAGS)"
+	@echo "  USE_NANO         = $(USE_NANO)"
+	@echo ""
+	@echo "Customization:"
+	@echo "  make USE_NANO=0        - Use standard newlib"
+	@echo "  make OPT_FLAGS=-Os     - Optimize for size"
+	@echo "  make ARCH_FLAGS=...    - Change architecture"
+	@echo ""
+
+# Dependencies (simplified)
+start.o: start.S
+bare_metal_syscalls.o: bare_metal_syscalls.c
+example_app.o: example_app.cpp
+
+# Show configuration
+info:
+	@echo "Build Configuration:"
+	@echo "  Compiler:  $(CXX)"
+	@echo "  CXXFLAGS:  $(CXXFLAGS)"
+	@echo "  LDFLAGS:   $(LDFLAGS)"
+	@echo "  LIBS:      $(LIBS)"
+	@echo "  Sources:   $(SOURCES)"
+	@echo "  Objects:   $(OBJECTS)"
+
